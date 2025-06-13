@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlashCard AI - Advanced Learning Tool</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#6366f1',
+                        secondary: '#f59e0b',
+                        accent: '#10b981',
+                        dark: '#1f2937',
+                    },
+                    animation: {
+                        'fade-in': 'fadeIn 0.5s ease-in-out',
+                        'slide-up': 'slideUp 0.6s ease-out',
+                        'bounce-subtle': 'bounceSubtle 0.6s ease-in-out',
+                        'glow': 'glow 2s ease-in-out infinite alternate',
+                    },
+                    keyframes: {
+                        fadeIn: {
+                            '0%': { opacity: '0' },
+                            '100%': { opacity: '1' }
+                        },
+                        slideUp: {
+                            '0%': { transform: 'translateY(20px)', opacity: '0' },
+                            '100%': { transform: 'translateY(0)', opacity: '1' }
+                        },
+                        bounceSubtle: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-5px)' }
+                        },
+                        glow: {
+                            '0%': { boxShadow: '0 0 20px rgba(99, 102, 241, 0.3)' },
+                            '100%': { boxShadow: '0 0 30px rgba(99, 102, 241, 0.6)' }
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .glass-effect {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .gradient-bg {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .card-flip {
+            transform-style: preserve-3d;
+            transition: transform 0.6s;
+        }
+        .card-flip.flipped {
+            transform: rotateY(180deg);
+        }
+        .card-front, .card-back {
+            backface-visibility: hidden;
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+        .card-back {
+            transform: rotateY(180deg);
+        }
+    </style>
+</head>
+<body class="min-h-screen gradient-bg">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Flask API endpoints
+        const API_BASE = 'http://localhost:5000/api';
+
+        const FlashcardApp = () => {
+            const [currentStep, setCurrentStep] = useState('input');
+            const [textInput, setTextInput] = useState('');
+            const [selectedFile, setSelectedFile] = useState(null);
+            const [flashcards, setFlashcards] = useState([]);
+            const [currentCardIndex, setCurrentCardIndex] = useState(0);
+            const [isFlipped, setIsFlipped] = useState(false);
+            const [isGenerating, setIsGenerating] = useState(false);
+            const [editingCard, setEditingCard] = useState(null);
+            const [apiKey, setApiKey] = useState('');
+            const [showApiModal, setShowApiModal] = useState(true);
+            const [error, setError] = useState('');
+            const [success, setSuccess] = useState('');
+            const fileInputRef = useRef(null);
+
+            // Load saved API key on component mount
+            useEffect(() => {
+                const savedKey = localStorage.getItem('openai_api_key');
+                if (savedKey) {
+                    setApiKey(savedKey);
+                    setShowApiModal(false);
+                }
+            }, []);
+
+            const validateApiKey = async (key) => {
+                try {
+                    const response = await fetch(`${API_BASE}/validate-key`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ api_key: key })
+                    });
+                    
+                    const data = await response.json();
+                    return data.valid;
+                } catch (error) {
+                    console.error('Error validating API key:', error);
+                    return false;
+                }
+            };
+
+            const handleApiKeySubmit = async () => {
+                if (!apiKey.trim()) {
+                    setError('Please enter your OpenAI API key');
+                    return;
+                }
+                
+                setError('');
+                setSuccess('');
+                
+                // Validate the API key
+                const isValid = await validateApiKey(apiKey);
+                if (isValid) {
+                    setShowApiModal(false);
+                    setSuccess('API key validated successfully!');
+                    localStorage.setItem('openai_api_key', apiKey);
+                } else {
+                    setError('Invalid API key. Please check and try again.');
+                }
+            };
+
+            const generateFlashcards = async () => {
+                if (!textInput.trim() && !selectedFile) {
+                    setError('Please provide text content or upload a file');
+                    return;
+                }
+                
+                if (!apiKey) {
+                    setError('API key is required');
+                    setShowApiModal(true);
+                    return;
+                }
+                
+                setIsGenerating(true);
+                setError('');
+                setSuccess('');
+                
+                try {
+                    const formData = new FormData();
+                    formData.append('text', textInput);
+                    formData.append('api_key', apiKey);
+                    
+                    if (selectedFile) {
+                        formData.append('file', selectedFile);
+                    }
+                    
+                    const response = await fetch(`${API_BASE}/generate-flashcards`, {
+                        method: 'POST',
+                        body: formData
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (response.ok && data.success) {
+                        setFlashcards(data.flashcards);
+                        setCurrentStep('review');
+                        setSuccess(`Successfully generated ${data.total_cards} flashcards!`);
+                    } else {
+                        setError(data.error || 'Failed to generate flashcards');
+                    }
+                } catch (error) {
+                    console.error('Error generating flashcards:', error);
+                    setError('Network error. Please make sure the Flask server is running on localhost:5000');
+                } finally {
+                    setIsGenerating(false);
+                }
+            };
+
+            const handleFileUpload = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    // Check file type
+                    const validTypes = ['text/plain', 'application/pdf'];
+                    if (!validTypes.includes(file.type)) {
+                        setError('Please upload only .txt or .pdf files');
+                        return;
+                    }
+                    
+                    // Check file size (16MB limit)
+                    if (file.size > 16 * 1024 * 1024) {
+                        setError('File size must be less than 16MB');
+                        return;
+                    }
+                    
+                    setSelectedFile(file);
+                    setError('');
+                    setSuccess(`File "${file.name}" selected successfully!`);
+                }
+            };
+
+            const exportFlashcards = (format) => {
+                let content, filename, mimeType;
+                
+                switch (format) {
+                    case 'csv':
+                        content = 'Question,Answer\n' + flashcards.map(card => 
+                            `"${card.question}","${card.answer}"`
+                        ).join('\n');
+                        filename = 'flashcards.csv';
+                        mimeType = 'text/csv';
+                        break;
+                    case 'json':
+                        content = JSON.stringify(flashcards, null, 2);
+                        filename = 'flashcards.json';
+                        mimeType = 'application/json';
+                        break;
+                    case 'anki':
+                        content = flashcards.map(card => `${card.question}\t${card.answer}`).join('\n');
+                        filename = 'flashcards.txt';
+                        mimeType = 'text/plain';
+                        break;
+                    default:
+                        return;
+                }
+                
+                const blob = new Blob([content], { type: mimeType });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.click();
+                URL.revokeObjectURL(url);
+            };
+
+            const editCard = (index) => {
+                setEditingCard({ ...flashcards[index], index });
+            };
+
+            const saveEdit = () => {
+                const updatedCards = [...flashcards];
+                updatedCards[editingCard.index] = {
+                    id: editingCard.id,
+                    question: editingCard.question,
+                    answer: editingCard.answer
+                };
+                setFlashcards(updatedCards);
+                setEditingCard(null);
+            };
+
+            const nextCard = () => {
+                setCurrentCardIndex((prev) => (prev + 1) % flashcards.length);
+                setIsFlipped(false);
+            };
+
+            const prevCard = () => {
+                setCurrentCardIndex((prev) => (prev - 1 + flashcards.length) % flashcards.length);
+                setIsFlipped(false);
+            };
+
+            const InputStep = () => (
+                <div className="animate-fade-in">
+                    <div className="text-center mb-12">
+                        <h1 className="text-5xl font-bold text-white mb-4 animate-bounce-subtle">
+                            <i className="fas fa-brain mr-4 text-yellow-300"></i>
+                            FlashCard AI
+                        </h1>
+                        <p className="text-xl text-gray-200">Transform your learning materials into smart flashcards</p>
+                    </div>
+
+                    {/* Error/Success Messages */}
+                    {error && (
+                        <div className="max-w-4xl mx-auto mb-6 bg-red-500/20 border border-red-500 text-red-100 px-6 py-4 rounded-xl">
+                            <i className="fas fa-exclamation-triangle mr-2"></i>
+                            {error}
+                        </div>
+                    )}
+                    
+                    {success && (
+                        <div className="max-w-4xl mx-auto mb-6 bg-green-500/20 border border-green-500 text-green-100 px-6 py-4 rounded-xl">
+                            <i className="fas fa-check-circle mr-2"></i>
+                            {success}
+                        </div>
+                    )}
+
+                    <div className="max-w-4xl mx-auto grid md:grid-cols-2 gap-8">
+                        {/* Text Input */}
+                        <div className="glass-effect rounded-2xl p-8 animate-slide-up">
+                            <h3 className="text-2xl font-semibold text-white mb-6 flex items-center">
+                                <i className="fas fa-edit mr-3 text-blue-300"></i>
+                                Paste Your Content
+                            </h3>
+                            <textarea
+                                value={textInput}
+                                onChange={(e) => setTextInput(e.target.value)}
+                                placeholder="Paste your educational content here... (lecture notes, textbook excerpts, study materials)"
+                                className="w-full h-64 p-4 rounded-xl border-2 border-gray-300 focus:border-primary focus:ring-2 focus:ring-primary/50 transition-all duration-300 resize-none bg-white/90"
+                            />
+                            <div className="mt-4 text-sm text-gray-200">
+                                <i className="fas fa-info-circle mr-2"></i>
+                                Minimum 50 characters recommended for quality flashcards
+                            </div>
+                            <div className="mt-2 text-xs text-gray-300">
+                                Current length: {textInput.length} characters
+                            </div>
+                        </div>
+
+                        {/* File Upload */}
+                        <div className="glass-effect rounded-2xl p-8 animate-slide-up" style={{animationDelay: '0.2s'}}>
+                            <h3 className="text-2xl font-semibold text-white mb-6 flex items-center">
+                                <i className="fas fa-upload mr-3 text-green-300"></i>
+                                Upload Files
+                            </h3>
+                            <div 
+                                className="border-2 border-dashed border-gray-300 rounded-xl p-8 text-center hover:border-primary transition-all duration-300 cursor-pointer bg-white/10 hover:bg-white/20"
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                <i className="fas fa-cloud-upload-alt text-4xl text-gray-400 mb-4"></i>
+                                <p className="text-gray-200 mb-2">
+                                    {selectedFile ? selectedFile.name : 'Click to upload or drag files here'}
+                                </p>
+                                <p className="text-sm text-gray-300">Supports: .txt, .pdf files (max 16MB)</p>
+                                <input
+                                    ref={fileInputRef}
+                                    type="file"
+                                    accept=".txt,.pdf"
+                                    onChange={handleFileUpload}
+                                    className="hidden"
+                                />
+                            </div>
+                            {selectedFile && (
+                                <div className="mt-4 flex items-center text-green-300">
+                                    <i className="fas fa-check-circle mr-2"></i>
+                                    File selected: {selectedFile.name} ({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="text-center mt-12">
+                        <button
+                            onClick={generateFlashcards}
+                            disabled={(!textInput.trim() && !selectedFile) || isGenerating}
+                            className="bg-gradient-to-r from-primary to-purple-600 hover:from-purple-600 hover:to-primary text-white px-12 py-4 rounded-full text-xl font-semibold transition-all duration-300 transform hover:scale-105 hover:shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed animate-glow"
+                        >
+                            <i className="fas fa-magic mr-3"></i>
+                            {isGenerating ? 'Generating...' : 'Generate Flashcards'}
+                        </button>
+                        <div className="mt-4 text-sm text-gray-200">
+                            <i className="fas fa-lightbulb mr-2"></i>
+                            Will generate 10-15 high-quality flashcards using AI
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const LoadingStep = () => (
+                <div className="text-center animate-fade-in">
+                    <div className="max-w-2xl mx-auto glass-effect rounded-2xl p-12">
+                        <div className="animate-spin w-16 h-16 border-4 border-primary border-t-transparent rounded-full mx-auto mb-8"></div>
+                        <h3 className="text-3xl font-semibold text-white mb-4">
+                            <i className="fas fa-cogs mr-3 text-yellow-300"></i>
+                            Generating Your Flashcards
+                        </h3>
+                        <p className="text-gray-200 mb-6">Our AI is analyzing your content and creating personalized flashcards...</p>
+                        <div className="w-full bg-gray-700 rounded-full h-3">
+                            <div className="bg-gradient-to-r from-primary to-purple-600 h-3 rounded-full animate-pulse" style={{width: '75%'}}></div>
+                        </div>
+                        <div className="mt-6 text-sm text-gray-300">
+                            <i className="fas fa-info-circle mr-2"></i>
+                            This may take 10-30 seconds depending on content length
+                        </div>
+                    </div>
+                </div>
+            );
+
+            const ReviewStep = () => (
+                <div className="animate-fade-in">
+                    <div className="text-center mb-8">
+                        <h2 className="text-4xl font-bold text-white mb-4">
+                            <i className="fas fa-cards mr-3 text-yellow-300"></i>
+                            Your Flashcards ({flashcards.length})
+                        </h2>
+                        <div className="flex justify-center space-x-4 mb-8">
+                            <button
+                                onClick={() => setCurrentStep('study')}
+                                className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-full transition-all duration-300 transform hover:scale-105"
+                            >
+                                <i className="fas fa-play mr-2"></i>Study Mode
+                            </button>
+                            <div className="relative group">
+                                <button className="bg-blue-500 hover:bg-blue-600 text-white px-6 py-3 rounded-full transition-all duration-300 transform hover:scale-105">
+                                    <i className="fas fa-download mr-2"></i>Export
+                                </button>
+                                <div className="absolute top-full mt-2 left-0 bg-white rounded-lg shadow-xl p-2 opacity-0 group-hover:opacity-100 transition-opacity duration-300 z-10">
+                                    <button onClick={() => exportFlashcards('csv')} className="block w-full text-left px-4 py-2 hover:bg-gray-100 rounded">CSV</button>
+                                    <button onClick={() => exportFlashcards('json')} className="block w-full text-left px-4 py-2 hover:bg-gray-100 rounded">JSON</button>
+                                    <button onClick={() => exportFlashcards('anki')} className="block w-full text-left px-4 py-2 hover:bg-gray-100 rounded">Anki</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="max-w-6xl mx-auto grid gap-6">
+                        {flashcards.map((card, index) => (
+                            <div key={card.id} className="glass-effect rounded-2xl p-6 hover:shadow-2xl transition-all duration-300">
+                                <div className="flex justify-between items-start">
+                                    <div className="flex-1">
+                                        <h4 className="text-lg font-semibold text-white mb-3 flex items-center">
+                                            <span className="bg-primary text-white rounded-full w-8 h-8 flex items-center justify-center text-sm mr-3">
+                                                {index + 1}
+                                            </span>
+                                            Question
+                                        </h4>
+                                        <p className="text-gray-200 mb-4">{card.question}</p>
+                                        <h4 className="text-lg font-semibold text-white mb-3 flex items-center">
+                                            <i className="fas fa-lightbulb mr-3 text-yellow-300"></i>Answer
+                                        </h4>
+                                        <p className="text-gray-200">{card.answer}</p>
+                                    </div>
+                                    <button
+                                        onClick={() => editCard(index)}
+                                        className="bg-yellow-500 hover:bg-yellow-600 text-white p-2 rounded-full transition-all duration-300 transform hover:scale-110"
+                                    >
+                                        <i className="fas fa-edit"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            const StudyStep = () => {
+                const currentCard = flashcards[currentCardIndex];
+                return (
+                    <div className="animate-fade-in">
+                        <div className="text-center mb-8">
+                            <h2 className="text-4xl font-bold text-white mb-4">
+                                <i className="fas fa-graduation-cap mr-3 text-yellow-300"></i>
+                                Study Mode
+                            </h2>
+                            <div className="text-white text-xl">
+                                Card {currentCardIndex + 1} of {flashcards.length}
+                            </div>
+                        </div>
+
+                        <div className="max-w-4xl mx-auto">
+                            <div className="relative h-96 mb-8">
+                                <div 
+                                    className={`card-flip w-full h-full cursor-pointer ${isFlipped ? 'flipped' : ''}`}
+                                    onClick={() => setIsFlipped(!isFlipped)}
+                                >
+                                    <div className="card-front glass-effect rounded-2xl p-8 flex items-center justify-center">
+                                        <div className="text-center">
+                                            <i className="fas fa-question-circle text-6xl text-blue-300 mb-6"></i>
+                                            <h3 className="text-2xl font-semibold text-white mb-4">Question</h3>
+                                            <p className="text-xl text-gray-200">{currentCard?.question}</p>
+                                            <p className="text-sm text-gray-300 mt-6">Click to reveal answer</p>
+                                        </div>
+                                    </div>
+                                    <div className="card-back glass-effect rounded-2xl p-8 flex items-center justify-center">
+                                        <div className="text-center">
+                                            <i className="fas fa-lightbulb text-6xl text-yellow-300 mb-6"></i>
+                                            <h3 className="text-2xl font-semibold text-white mb-4">Answer</h3>
+                                            <p className="text-xl text-gray-200">{currentCard?.answer}</p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="flex justify-center space-x-6">
+                                <button
+                                    onClick={prevCard}
+                                    className="bg-gray-600 hover:bg-gray-700 text-white px-8 py-4 rounded-full transition-all duration-300 transform hover:scale-105"
+                                >
+                                    <i className="fas fa-chevron-left mr-2"></i>Previous
+                                </button>
+                                <button
+                                    onClick={() => setCurrentStep('review')}
+                                    className="bg-blue-500 hover:bg-blue-600 text-white px-8 py-4 rounded-full transition-all duration-300 transform hover:scale-105"
+                                >
+                                    <i className="fas fa-list mr-2"></i>All Cards
+                                </button>
+                                <button
+                                    onClick={nextCard}
+                                    className="bg-gray-600 hover:bg-gray-700 text-white px-8 py-4 rounded-full transition-all duration-300 transform hover:scale-105"
+                                >
+                                    Next<i className="fas fa-chevron-right ml-2"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            };
+
+            return (
+                <div className="min-h-screen p-8">
+                    {/* API Key Modal */}
+                    {showApiModal && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                            <div className="bg-white rounded-2xl p-8 max-w-md w-full mx-4">
+                                <h3 className="text-2xl font-bold mb-4 text-center">
+                                    <i className="fas fa-key mr-3 text-primary"></i>
+                                    OpenAI API Key Required
+                                </h3>
+                                <p className="text-gray-600 mb-6">Enter your OpenAI API key to generate flashcards using GPT-3.5-turbo</p>
+                                
+                                {error && (
+                                    <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg text-sm">
+                                        {error}
+                                    </div>
+                                )}
+                                
+                                <input
+                                    type="password"
+                                    value={apiKey}
+                                    onChange={(e) => setApiKey(e.target.value)}
+                                    placeholder="sk-..."
+                                    className="w-full p-4 border-2 border-gray-300 rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/50 transition-all duration-300 mb-6"
+                                />
+                                <button
+                                    onClick={handleApiKeySubmit}
+                                    disabled={!apiKey.trim()}
+                                    className="w-full bg-primary hover:bg-purple-600 disabled:bg-gray-400 text-white py-3 rounded-xl transition-all duration-300 font-semibold"
+                                >
+                                    Validate & Continue
+                                </button>
+                                <p className="text-xs text-gray-500 mt-4 text-center">
+                                    Your API key is stored locally and never shared
+                                </p>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Edit Modal */}
+                    {editingCard && (
+                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                            <div className="bg-white rounded-2xl p-8 max-w-2xl w-full mx-4">
+                                <h3 className="text-2xl font-bold mb-6">Edit Flashcard</h3>
+                                <div className="mb-4">
+                                    <label className="block text-sm font-semibold mb-2">Question</label>
+                                    <textarea
+                                        value={editingCard.question}
+                                        onChange={(e) => setEditingCard({...editingCard, question: e.target.value})}
+                                        className="w-full p-4 border-2 border-gray-300 rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/50 transition-all duration-300 h-20"
+                                    />
+                                </div>
+                                <div className="mb-6">
+                                    <label className="block text-sm font-semibold mb-2">Answer</label>
+                                    <textarea
+                                        value={editingCard.answer}
+                                        onChange={(e) => setEditingCard({...editingCard, answer: e.target.value})}
+                                        className="w-full p-4 border-2 border-gray-300 rounded-xl focus:border-primary focus:ring-2 focus:ring-primary/50 transition-all duration-300 h-32"
+                                    />
+                                </div>
+                                <div className="flex space-x-4">
+                                    <button
+                                        onClick={saveEdit}
+                                        className="bg-green-500 hover:bg-green-600 text-white px-6 py-3 rounded-xl transition-all duration-300 flex-1"
+                                    >
+                                        Save Changes
+                                    </button>
+                                    <button
+                                        onClick={() => setEditingCard(null)}
+                                        className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-3 rounded-xl transition-all duration-300 flex-1"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Main Content */}
+                    <div className="max-w-7xl mx-auto">
+                        {isGenerating ? <LoadingStep /> : 
+                         currentStep === 'input' ? <InputStep /> :
+                         currentStep === 'review' ? <ReviewStep /> :
+                         currentStep === 'study' ? <StudyStep /> : null}
+                    </div>
+
+                    {/* Navigation */}
+                    {currentStep !== 'input' && !isGenerating && (
+                        <div className="fixed bottom-8 left-8">
+                            <button
+                                onClick={() => {
+                                    if (currentStep === 'study') setCurrentStep('review');
+                                    else if (currentStep === 'review') setCurrentStep('input');
+                                }}
+                                className="bg-gray-800 hover:bg-gray-900 text-white p-4 rounded-full shadow-2xl transition-all duration-300 transform hover:scale-110"
+                            >
+                                <i className="fas fa-arrow-left"></i>
+                            </button>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        ReactDOM.render(<FlashcardApp />, document.getElementById('root'));
+    </script>
+</body>
+</html>
